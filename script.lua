@@ -1,5 +1,5 @@
 -- ==========================================
--- CYBER HUNTER v3.1 (FIXED UI & CONFIG)
+-- CYBER HUNTER v3.2 (SEARCH & HIGH-VALUE STOP)
 -- ==========================================
 local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
@@ -16,6 +16,8 @@ while not lp do task.wait() lp = Players.LocalPlayer end
 -- ==========================================
 local CONFIG_FILE = "BrainrotConfig.json"
 local TARGET_MUTATION = "Cyber"
+local HIGH_VALUE_THRESHOLD = 50000000 -- 50M/s
+local SCAN_DELAY = 7 -- Увеличенный делей для прогрузки
 local isRunning = true
 local CheckedPets = {}
 local API = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100&excludeFullGames=true"
@@ -168,9 +170,18 @@ local PET_NAMES = {
     "Gold Elf"
 }
 
+
 -- ==========================================
--- SAVE/LOAD SYSTEM
+-- HELPERS
 -- ==========================================
+local function parseValue(text)
+    local numStr, suffix = string.match(text, "%$?([%d%.]+)([KkMmBbTt]?)/s")
+    if not numStr then return 0 end
+    local num = tonumber(numStr) or 0
+    local multipliers = {K=1e3, M=1e6, B=1e9, T=1e12, k=1e3, m=1e6, b=1e9, t=1e12}
+    return num * (multipliers[suffix] or 1)
+end
+
 local function LoadConfig()
     if isfile(CONFIG_FILE) then
         local success, data = pcall(function() return HttpService:JSONDecode(readfile(CONFIG_FILE)) end)
@@ -186,58 +197,57 @@ end
 -- UI CONSTRUCTION (IMAGE_4C605C.PNG)
 -- ==========================================
 local ScreenGui = Instance.new("ScreenGui", CoreGui)
-ScreenGui.Name = "BrainrotCollector"
+ScreenGui.Name = "BrainrotCollectorPro"
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 350, 0, 450)
-MainFrame.Position = UDim2.new(0.5, -175, 0.5, -225)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.Size = UDim2.new(0, 350, 0, 500)
+MainFrame.Position = UDim2.new(0.5, -175, 0.5, -250)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
 
--- Кнопка для перетаскивания (Header)
 local Header = Instance.new("Frame", MainFrame)
 Header.Size = UDim2.new(1, 0, 0, 30)
-Header.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-Header.BorderSizePixel = 0
+Header.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 
 local Title = Instance.new("TextLabel", Header)
 Title.Size = UDim2.new(1, 0, 1, 0)
-Title.Text = "BRAINROT CYBER HUNTER"
+Title.Text = "BRAINROT HUNTER v3.2"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.Font = Enum.Font.GothamBold
 Title.BackgroundTransparency = 1
 
+local SearchBox = Instance.new("TextBox", MainFrame)
+SearchBox.Size = UDim2.new(1, -20, 0, 30)
+SearchBox.Position = UDim2.new(0, 10, 0, 40)
+SearchBox.PlaceholderText = "Search brainrot..."
+SearchBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBox.Font = Enum.Font.Gotham
+SearchBox.Text = ""
+
 local CounterLabel = Instance.new("TextLabel", MainFrame)
-CounterLabel.Size = UDim2.new(1, -20, 0, 25)
-CounterLabel.Position = UDim2.new(0, 10, 0, 35)
-CounterLabel.Text = "Total amount 0/453"
+CounterLabel.Size = UDim2.new(1, -20, 0, 20)
+CounterLabel.Position = UDim2.new(0, 10, 0, 75)
+CounterLabel.Text = "Total amount 0/338"
 CounterLabel.TextColor3 = Color3.fromRGB(0, 255, 127)
-CounterLabel.Font = Enum.Font.Gotham
-CounterLabel.BackgroundTransparency = 1
 CounterLabel.TextXAlignment = Enum.TextXAlignment.Right
+CounterLabel.BackgroundTransparency = 1
 
 local Scroll = Instance.new("ScrollingFrame", MainFrame)
-Scroll.Size = UDim2.new(1, -20, 1, -115)
-Scroll.Position = UDim2.new(0, 10, 0, 65)
-Scroll.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Scroll.Size = UDim2.new(1, -20, 1, -170)
+Scroll.Position = UDim2.new(0, 10, 0, 100)
 Scroll.CanvasSize = UDim2.new(0, 0, 0, #PET_NAMES * 28)
-Scroll.ScrollBarThickness = 6
-Scroll.BorderSizePixel = 0
+Scroll.ScrollBarThickness = 4
+Scroll.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 
 local Layout = Instance.new("UIListLayout", Scroll)
-Layout.Padding = UDim.new(0, 4)
+Layout.Padding = UDim.new(0, 2)
 
-local function UpdateCounter()
-    local count = 0
-    for _ in pairs(CheckedPets) do count = count + 1 end
-    CounterLabel.Text = "Total amount " .. count .. "/453"
-end
-
--- Генерация списка чекбоксов
+local petEntries = {}
 for _, name in ipairs(PET_NAMES) do
     local Entry = Instance.new("Frame", Scroll)
-    Entry.Size = UDim2.new(1, -12, 0, 24)
-    Entry.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    Entry.Size = UDim2.new(1, -10, 0, 26)
+    Entry.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     Entry.BorderSizePixel = 0
 
     local Label = Instance.new("TextLabel", Entry)
@@ -247,159 +257,127 @@ for _, name in ipairs(PET_NAMES) do
     Label.TextColor3 = Color3.fromRGB(200, 200, 200)
     Label.TextXAlignment = Enum.TextXAlignment.Left
     Label.BackgroundTransparency = 1
-    Label.Font = Enum.Font.Gotham
 
     local Checkbox = Instance.new("TextButton", Entry)
-    Checkbox.Size = UDim2.new(0, 18, 0, 18)
+    Checkbox.Size = UDim2.new(0, 20, 0, 20)
     Checkbox.Position = UDim2.new(0.9, 0, 0, 3)
     Checkbox.Text = CheckedPets[name] and "X" or ""
-    Checkbox.BackgroundColor3 = CheckedPets[name] and Color3.fromRGB(0, 255, 127) or Color3.fromRGB(60, 60, 60)
-    Checkbox.TextColor3 = Color3.fromRGB(0, 0, 0)
-    Checkbox.Font = Enum.Font.GothamBold
+    Checkbox.BackgroundColor3 = CheckedPets[name] and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(60, 60, 60)
 
     Checkbox.MouseButton1Click:Connect(function()
-        if CheckedPets[name] then
-            CheckedPets[name] = nil
-            Checkbox.Text = ""
-            Checkbox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        else
-            CheckedPets[name] = true
-            Checkbox.Text = "X"
-            Checkbox.BackgroundColor3 = Color3.fromRGB(0, 255, 127)
-        end
+        CheckedPets[name] = not CheckedPets[name] or nil
+        Checkbox.Text = CheckedPets[name] and "X" or ""
+        Checkbox.BackgroundColor3 = CheckedPets[name] and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(60, 60, 60)
         SaveConfig()
-        UpdateCounter()
+        local count = 0; for _ in pairs(CheckedPets) do count = count + 1 end
+        CounterLabel.Text = "Total amount " .. count .. "/338"
     end)
+    petEntries[name] = Entry
 end
 
+-- Поисковая логика
+SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local text = SearchBox.Text:lower()
+    for name, entry in pairs(petEntries) do
+        entry.Visible = name:lower():find(text) ~= nil
+    end
+end)
+
 local ToggleButton = Instance.new("TextButton", MainFrame)
-ToggleButton.Size = UDim2.new(1, -20, 0, 35)
-ToggleButton.Position = UDim2.new(0, 10, 1, -45)
+ToggleButton.Size = UDim2.new(1, -20, 0, 40)
+ToggleButton.Position = UDim2.new(0, 10, 1, -50)
 ToggleButton.Text = "STOP HUNT"
 ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleButton.Font = Enum.Font.GothamBold
 
--- Система перетаскивания (Draggable Fix)
-local dragging, dragInput, dragStart, startPos
-Header.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-end)
+-- Драг-энд-дроп
+local dragging, dragStart, startPos
+Header.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true; dragStart = i.Position; startPos = MainFrame.Position end end)
+UserInputService.InputChanged:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseMovement and dragging then local delta = i.Position - dragStart; MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end)
+UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
 
 -- ==========================================
 -- BEAM LOGIC
 -- ==========================================
-local function CreatePowerBeam(target)
+local function CreatePowerBeam(target, color)
     local char = lp.Character or lp.CharacterAdded:Wait()
     local hrp = char:WaitForChild("HumanoidRootPart")
-
-    -- Находим или создаем физическую точку
     local targetPart = target:IsA("BasePart") and target or target:FindFirstChildWhichIsA("BasePart", true)
+    
     if not targetPart then
-        targetPart = Instance.new("Part")
-        targetPart.Size = Vector3.new(1, 1, 1)
-        targetPart.Transparency = 1
-        targetPart.CanCollide = false
-        targetPart.Anchored = true
-        targetPart.CFrame = target:GetPivot()
-        targetPart.Parent = Workspace
+        targetPart = Instance.new("Part", Workspace); targetPart.Size = Vector3.new(1,1,1); targetPart.Transparency = 1; targetPart.CanCollide = false; targetPart.Anchored = true; targetPart.CFrame = target:GetPivot()
     end
 
     local att0 = Instance.new("Attachment", hrp)
     local att1 = Instance.new("Attachment", targetPart)
-
     local beam = Instance.new("Beam", char)
-    beam.Attachment0 = att0
-    beam.Attachment1 = att1
-    beam.Color = ColorSequence.new(Color3.fromRGB(0, 255, 255))
-    beam.Width0 = 3
-    beam.Width1 = 3
-    beam.LightEmission = 1
-    beam.FaceCamera = true
-    beam.Texture = "rbxassetid://403870490"
-    beam.TextureSpeed = 4
+    beam.Attachment0 = att0; beam.Attachment1 = att1; beam.Color = ColorSequence.new(color); beam.Width0 = 3; beam.Width1 = 3; beam.FaceCamera = true; beam.Texture = "rbxassetid://403870490"; beam.TextureSpeed = 4
 end
 
 -- ==========================================
--- HOPPER & SCANNER
+-- MAIN LOGIC (WITH HIGH-VALUE STOP)
 -- ==========================================
 local function StartTeleport()
     if not isRunning then return end
-    
     local success, content = pcall(function() return readfile("Servers.JSON") end)
-    if not success or content == "" then
-        writefile("Servers.JSON", game:HttpGet(API))
-        content = readfile("Servers.JSON")
-    end
-    
+    if not success or content == "" then writefile("Servers.JSON", game:HttpGet(API)); content = readfile("Servers.JSON") end
     local JSONData = HttpService:JSONDecode(content)
     if JSONData and JSONData.data and #JSONData.data > 0 then
-        local JobId = JSONData.data[1].id
-        table.remove(JSONData.data, 1)
-        writefile("Servers.JSON", HttpService:JSONEncode(JSONData))
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, JobId, lp)
-    else
-        delfile("Servers.JSON")
-        task.wait(1)
-        StartTeleport()
-    end
+        local JobId = JSONData.data[1].id; table.remove(JSONData.data, 1); writefile("Servers.JSON", HttpService:JSONEncode(JSONData)); TeleportService:TeleportToPlaceInstance(game.PlaceId, JobId, lp)
+    else delfile("Servers.JSON"); task.wait(1); StartTeleport() end
 end
 
 local function ScanServer()
     if not isRunning then return end
-    task.wait(4)
+    print("[System] Waiting for assets (7s)...")
+    task.wait(SCAN_DELAY)
 
-    local debris = Workspace:WaitForChild("Debris", 10)
-    local targetFound = nil
+    local debris = Workspace:WaitForChild("Debris", 15)
+    local stopReason = nil
+    local targetObj = nil
 
     if debris then
         for _, template in ipairs(debris:GetChildren()) do
             if template.Name == "FastOverheadTemplate" then
-                local petName = "Unknown"
+                local petName, petGen = "Unknown", "0/s"
                 local isCyber = false
 
                 for _, el in ipairs(template:GetDescendants()) do
                     if el:IsA("TextLabel") then
-                        local txt = string.gsub(el.Text, "<[^>]+>", "")
-                        if el.Name == "DisplayName" then petName = txt end
-                        if string.find(string.lower(txt), "cyber") then isCyber = true end
+                        local txt = el.Text:gsub("<[^>]+>", "")
+                        if el.Name == "DisplayName" then petName = txt
+                        elseif el.Name == "Generation" then petGen = txt
+                        elseif txt:lower():find("cyber") then isCyber = true end
                     end
                 end
 
-                -- Если нашли кибера, проверяем, нет ли его в "Залитых" чекбоксах
-                if isCyber then
-                    if CheckedPets[petName] then
-                        print("[System] Игнорирую " .. petName .. " (уже в конфиге)")
-                    else
-                        targetFound = {instance = template, name = petName}
-                        break
-                    end
+                local val = parseValue(petGen)
+                
+                -- ПРОВЕРКА 1: Доходность 50M/с+ (Приоритет)
+                if val >= HIGH_VALUE_THRESHOLD then
+                    stopReason = string.format("HIGH VALUE: %s (%s)", petName, petGen)
+                    targetObj = template
+                    break
+                end
+
+                -- ПРОВЕРКА 2: Cyber мутация (если не в конфиге)
+                if isCyber and not CheckedPets[petName] then
+                    stopReason = "CYBER: " .. petName
+                    targetObj = template
+                    break
                 end
             end
         end
     end
 
-    if targetFound then
+    if stopReason then
         isRunning = false
         ToggleButton.Text = "START HUNT"
         ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        print("[!!!] ЦЕЛЬ ОБНАРУЖЕНА: " .. targetFound.name)
-        CreatePowerBeam(targetFound.instance)
+        print("[!!!] STOPPED: " .. stopReason)
+        CreatePowerBeam(targetObj, val and val >= HIGH_VALUE_THRESHOLD and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(0, 255, 255))
     else
-        print("[System] Подходящих целей нет, прыгаю дальше...")
+        print("[System] No targets found. Hopping...")
         StartTeleport()
     end
 end
@@ -407,15 +385,7 @@ end
 -- ==========================================
 -- INIT
 -- ==========================================
-LoadConfig()
-UpdateCounter()
-
-ToggleButton.MouseButton1Click:Connect(function()
-    isRunning = not isRunning
-    ToggleButton.Text = isRunning and "STOP HUNT" or "START HUNT"
-    ToggleButton.BackgroundColor3 = isRunning and Color3.fromRGB(200, 50, 50) or Color3.fromRGB(50, 200, 50)
-    if isRunning then ScanServer() end
-end)
-
+LoadConfig(); local c = 0; for _ in pairs(CheckedPets) do c = c + 1 end; CounterLabel.Text = "Total amount " .. c .. "/338"
+ToggleButton.MouseButton1Click:Connect(function() isRunning = not isRunning; ToggleButton.Text = isRunning and "STOP HUNT" or "START HUNT"; ToggleButton.BackgroundColor3 = isRunning and Color3.fromRGB(200, 50, 50) or Color3.fromRGB(50, 200, 50); if isRunning then ScanServer() end end)
 if isRunning then task.spawn(ScanServer) end
-print("Cyber Hunter v3.1 Loaded! UI Fixed.")
+print("Cyber Hunter v3.2 Loaded! Search enabled. 50M/s stop enabled.")
