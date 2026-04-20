@@ -1,5 +1,5 @@
 -- ==========================================
--- CYBER MUTATION HUNTER v2.4 (MULTI-FIND & AUTO-HOP)
+-- CYBER MUTATION HUNTER v2.5 (AUTO-RESUME & FIXED BEAM)
 -- ==========================================
 local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
@@ -7,7 +7,7 @@ local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 
--- Ожидание игрока
+-- Надежное ожидание LocalPlayer
 local lp = Players.LocalPlayer
 while not lp do
     task.wait()
@@ -15,7 +15,8 @@ while not lp do
 end
 
 local TARGET_MUTATION = "Cyber"
-local isRunning = false
+-- ТЕПЕРЬ ПО УМОЛЧАНИЮ TRUE ДЛЯ АВТО-СТАРТА ПОСЛЕ ХОПА
+local isRunning = true 
 local API = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100&excludeFullGames=true"
 
 -- ==========================================
@@ -24,18 +25,18 @@ local API = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Pu
 local ScreenGui = Instance.new("ScreenGui")
 local MainButton = Instance.new("TextButton")
 
-ScreenGui.Name = "CyberUltraGui"
+ScreenGui.Name = "CyberAutoHunterGui"
 ScreenGui.Parent = CoreGui
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 MainButton.Name = "ToggleButton"
 MainButton.Parent = ScreenGui
-MainButton.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+MainButton.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainButton.Position = UDim2.new(0, 20, 0.5, -25)
 MainButton.Size = UDim2.new(0, 160, 0, 50)
 MainButton.Font = Enum.Font.GothamBold
-MainButton.Text = "START HUNT"
-MainButton.TextColor3 = Color3.fromRGB(0, 255, 127)
+MainButton.Text = "STOP HUNT" -- Сразу пишем STOP, так как охота активна
+MainButton.TextColor3 = Color3.fromRGB(255, 75, 75)
 MainButton.TextSize = 16
 
 local UICorner = Instance.new("UICorner")
@@ -43,12 +44,12 @@ UICorner.CornerRadius = UDim.new(0, 12)
 UICorner.Parent = MainButton
 
 local UIStroke = Instance.new("UIStroke")
-UIStroke.Color = Color3.fromRGB(0, 255, 127)
+UIStroke.Color = Color3.fromRGB(255, 75, 75)
 UIStroke.Thickness = 3
 UIStroke.Parent = MainButton
 
 -- ==========================================
--- ВИЗУАЛИЗАЦИЯ (ЛУЧ)
+-- ВИЗУАЛИЗАЦИЯ (ЛУЧ К ТЕКСТУ ИЛИ ПЕТУ)
 -- ==========================================
 local function CreateBeamToTarget(target)
     local char = lp.Character
@@ -56,17 +57,21 @@ local function CreateBeamToTarget(target)
     
     local hrp = char.HumanoidRootPart
 
-    -- Очистка старых лучей
+    -- Полная очистка старых визуалов
     for _, old in ipairs(char:GetChildren()) do
         if old.Name == "CyberHunt_Beam" then old:Destroy() end
     end
+    for _, old in ipairs(hrp:GetChildren()) do
+        if old.Name == "CyberHunt_Att0" then old:Destroy() end
+    end
 
-    local att0 = hrp:FindFirstChild("CyberHunt_Att0") or Instance.new("Attachment", hrp)
-    att0.Name = "CyberHunt_Att0"
-
+    -- Находим физическую часть в шаблоне для привязки луча
     local targetPart = target:IsA("BasePart") and target or target:FindFirstChildWhichIsA("BasePart", true)
     
     if targetPart then
+        local att0 = Instance.new("Attachment", hrp)
+        att0.Name = "CyberHunt_Att0"
+
         local att1 = Instance.new("Attachment", targetPart)
         att1.Name = "CyberHunt_Att1"
 
@@ -74,14 +79,20 @@ local function CreateBeamToTarget(target)
         beam.Name = "CyberHunt_Beam"
         beam.Attachment0 = att0
         beam.Attachment1 = att1
-        beam.Width0 = 2
-        beam.Width1 = 2
+        beam.Width0 = 3 -- Жирный луч
+        beam.Width1 = 3
         beam.Color = ColorSequence.new(Color3.fromRGB(0, 255, 255))
         beam.LightEmission = 1
+        beam.LightInfluence = 0
         beam.FaceCamera = true
         beam.Texture = "rbxassetid://403870490"
-        beam.TextureSpeed = 2
+        beam.TextureSpeed = 3
+        beam.ZOffset = 5 -- Всегда поверх большинства объектов
         beam.Parent = char
+        
+        print("[Visuals] Силовой луч успешно направлен на Cyber-цель.")
+    else
+        warn("[Visuals] Ошибка: Не найдена физическая часть для луча в " .. target.Name)
     end
 end
 
@@ -90,56 +101,68 @@ end
 -- ==========================================
 local function StartTeleport()
     if not isRunning then return end
-    print("[System] Ищу новый сервер...")
+    print("[System] Переход на следующий сервер...")
 
-    if not isfile("Servers.JSON") then
-        local success, result = pcall(function() return game:HttpGet(API) end)
-        if success then writefile("Servers.JSON", result) end
+    -- Проверяем наличие файла серверов
+    local successLoad, content = pcall(function() return readfile("Servers.JSON") end)
+    
+    if not successLoad or content == "" then
+        local successGet, result = pcall(function() return game:HttpGet(API) end)
+        if successGet then 
+            writefile("Servers.JSON", result)
+            content = result
+        else
+            warn("[System] Ошибка получения списка API. Жду 5 сек...")
+            task.wait(5)
+            return StartTeleport()
+        end
     end
 
-    local content = readfile("Servers.JSON")
-    local success, JSONData = pcall(function() return HttpService:JSONDecode(content) end)
+    local successDecode, JSONData = pcall(function() return HttpService:JSONDecode(content) end)
     
-    if success and JSONData and JSONData.data and #JSONData.data > 0 then
+    if successDecode and JSONData and JSONData.data and #JSONData.data > 0 then
         local JobId = JSONData.data[1].id
         table.remove(JSONData.data, 1)
         writefile("Servers.JSON", HttpService:JSONEncode(JSONData))
         
         TeleportService:TeleportToPlaceInstance(game.PlaceId, JobId, lp)
     else
-        delfile("Servers.JSON")
+        -- Если список кончился, удаляем файл и берем свежий
+        pcall(function() delfile("Servers.JSON") end)
         task.wait(1)
         StartTeleport()
     end
 end
 
 -- ==========================================
--- ПОИСК ВСЕХ КИБЕРОВ НА СЕРВЕРЕ
+-- ГЛАВНЫЙ СКАНЕР
 -- ==========================================
 local function ScanServer()
     if not isRunning then return end
 
     local debris = Workspace:WaitForChild("Debris", 15)
-    print("[System] Ожидание репликации объектов (3.5 сек)...")
-    task.wait(3.5)
+    print("[System] Сервер загружен. Ожидание прогрузки петов (4 сек)...")
+    task.wait(4) -- Немного увеличил, чтобы наверняка прогрузились оверхеды
 
-    local foundList = {} -- Таблица для хранения найденных объектов
+    local foundList = {}
 
     if debris then
         for _, template in ipairs(debris:GetChildren()) do
             if template.Name == "FastOverheadTemplate" then
-                local currentName = "Unknown"
+                local petName = "Unknown Pet"
                 local hasCyber = false
 
-                -- Проходим по всем лейблам внутри оверхеда
+                -- Сканируем всё внутри оверхеда
                 for _, element in ipairs(template:GetDescendants()) do
                     if element:IsA("TextLabel") then
-                        local text = string.gsub(element.Text, "<[^>]+>", "")
+                        local text = string.gsub(element.Text, "<[^>]+>", "") -- Чистим RichText
                         
+                        -- Запоминаем имя
                         if element.Name == "DisplayName" then
-                            currentName = text
+                            petName = text
                         end
 
+                        -- Ищем мутацию
                         if string.find(string.lower(text), string.lower(TARGET_MUTATION)) then
                             hasCyber = true
                         end
@@ -147,34 +170,33 @@ local function ScanServer()
                 end
 
                 if hasCyber then
-                    table.insert(foundList, {instance = template, name = currentName})
+                    table.insert(foundList, {instance = template, name = petName})
                 end
             end
         end
     end
 
-    -- Обработка результатов
+    -- Результаты поиска
     if #foundList > 0 then
-        isRunning = false -- ОСТАНАВЛИВАЕМ ХОППЕР, МЫ НАШЛИ ЦЕЛЬ
+        isRunning = false -- СТОП ОХОТА, ЦЕЛЬ НАЙДЕНА
         
-        print("-----------------------------------------")
-        print(string.format("[!!!] НАЙДЕНО КИБЕРОВ: %d", #foundList))
-        
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print(string.format("[!!!] НАЙДЕНО CYBER ПЕТОВ: %d", #foundList))
         for i, data in ipairs(foundList) do
-            print(string.format("[%d] Брейнрот: %s", i, data.name))
+            print(string.format("[%d] Название: %s", i, data.name))
         end
-        print("-----------------------------------------")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
-        -- Рисуем луч к первому найденному
+        -- Создаем луч к первому найденному
         CreateBeamToTarget(foundList[1].instance)
         
-        MainButton.Text = "CYBER FOUND (" .. #foundList .. ")"
+        MainButton.Text = "FOUND: " .. #foundList
         MainButton.TextColor3 = Color3.fromRGB(0, 255, 255)
         UIStroke.Color = Color3.fromRGB(0, 255, 255)
     else
-        -- Если ничего не нашли - прыгаем дальше автоматически
+        -- Если ничего не нашли - авто-хоп
         if isRunning then
-            print("[System] На этом сервере пусто. Хопаю дальше...")
+            print("[System] На сервере нет Cyber-мутаций. Продолжаю поиск...")
             task.wait(0.5)
             StartTeleport()
         end
@@ -182,7 +204,7 @@ local function ScanServer()
 end
 
 -- ==========================================
--- КНОПКА
+-- УПРАВЛЕНИЕ КНОПКОЙ
 -- ==========================================
 MainButton.MouseButton1Click:Connect(function()
     isRunning = not isRunning
@@ -191,17 +213,15 @@ MainButton.MouseButton1Click:Connect(function()
         MainButton.Text = "STOP HUNT"
         MainButton.TextColor3 = Color3.fromRGB(255, 75, 75)
         UIStroke.Color = Color3.fromRGB(255, 75, 75)
-        print("[System] Охота началась!")
         ScanServer()
     else
         MainButton.Text = "START HUNT"
         MainButton.TextColor3 = Color3.fromRGB(0, 255, 127)
         UIStroke.Color = Color3.fromRGB(0, 255, 127)
-        print("[System] Охота остановлена.")
     end
 end)
 
--- Фикс застревания при загрузке сервера
+-- Фикс ошибок телепорта (предотвращение застревания)
 TeleportService.TeleportInitFailed:Connect(function()
     if isRunning then
         task.wait(3)
@@ -209,5 +229,7 @@ TeleportService.TeleportInitFailed:Connect(function()
     end
 end)
 
+-- АВТО-ЗАПУСК СКАНЕРА ПРИ ВЫПОЛНЕНИИ СКРИПТА
 if not game:IsLoaded() then game.Loaded:Wait() end
-print("Cyber Hunter v2.4 (Infinite Loop & Multi-Log) Loaded!")
+print("Cyber Hunter v2.5 Loaded! Auto-scanning started...")
+task.spawn(ScanServer)
